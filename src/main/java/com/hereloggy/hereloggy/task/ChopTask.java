@@ -53,6 +53,7 @@ public class ChopTask extends BukkitRunnable {
     private int currentIndex = 0;
     private int chopPause = 0;
     private int stuckTicks = 0;
+    private int foliageScanCooldown = 0;
     private int lastTargetIndex = -1;
     private double lastDist = Double.MAX_VALUE;
 
@@ -141,6 +142,14 @@ public class ChopTask extends BukkitRunnable {
 
         Location target = path.get(currentIndex);
         Location current = player.getLocation();
+
+        // 1d. Local Foliage Scan and Active Clearing
+        if (foliageScanCooldown <= 0) {
+            scanAndClearFoliage(current);
+            foliageScanCooldown = 4; // Scan and clear every 5 ticks to optimize performance
+        } else {
+            foliageScanCooldown--;
+        }
 
         if (current.getWorld() != target.getWorld()) {
             sendActivitySummary();
@@ -1036,12 +1045,24 @@ public class ChopTask extends BukkitRunnable {
         }
     }
 
+    private boolean isFoliageOrLog(Material mat) {
+        return isLogBlock(mat) || isLeavesBlock(mat) || isNetherFoliageBlock(mat) || isMangroveRootBlock(mat);
+    }
+
     private boolean isSafeStandLocation(World world, int x, int y, int z) {
         Block feet = world.getBlockAt(x, y, z);
         Block head = world.getBlockAt(x, y + 1, z);
         Block ground = world.getBlockAt(x, y - 1, z);
         
-        return !feet.getType().isSolid() && !head.getType().isSolid() && ground.getType().isSolid();
+        Material feetType = feet.getType();
+        Material headType = head.getType();
+        Material groundType = ground.getType();
+
+        boolean feetPassable = !feetType.isSolid() || isFoliageOrLog(feetType);
+        boolean headPassable = !headType.isSolid() || isFoliageOrLog(headType);
+        boolean groundSolid = groundType.isSolid() && !isFoliageOrLog(groundType);
+
+        return feetPassable && headPassable && groundSolid;
     }
 
     private void dumpSaplingsToChests() {
@@ -1098,6 +1119,84 @@ public class ChopTask extends BukkitRunnable {
             }
             choppedTrees.clear();
         });
+    }
+
+    private boolean isClearableFoliage(Material mat) {
+        String name = mat.name();
+        return isLeavesBlock(mat) || isNetherFoliageBlock(mat) || mat == Material.VINE ||
+               mat == Material.SHORT_GRASS || mat == Material.TALL_GRASS ||
+               mat == Material.FERN || mat == Material.LARGE_FERN ||
+               name.contains("LEAVES") || name.contains("LICHEN") || name.contains("MOSS");
+    }
+
+    private void scanAndClearFoliage(Location current) {
+        World world = current.getWorld();
+        int px = current.getBlockX();
+        int py = current.getBlockY();
+        int pz = current.getBlockZ();
+
+        int foliageCount = 0;
+        int logCount = 0;
+
+        // Scan 5-block area around player to count logs and foliage
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dy = -1; dy <= 4; dy++) {
+                for (int dz = -5; dz <= 5; dz++) {
+                    Material type = world.getBlockAt(px + dx, py + dy, pz + dz).getType();
+                    if (isClearableFoliage(type)) {
+                        foliageCount++;
+                    } else if (isLogBlock(type)) {
+                        logCount++;
+                    }
+                }
+            }
+        }
+
+        // If there is too much foliage (e.g. >= 10 blocks), clear foliage blocks in 3-block radius
+        if (foliageCount >= 10) {
+            boolean clearedAny = false;
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dy = -1; dy <= 3; dy++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        Block block = world.getBlockAt(px + dx, py + dy, pz + dz);
+                        Material type = block.getType();
+                        if (isClearableFoliage(type)) {
+                            // Ensure player has a tool and enough durability
+                            if (!verifyToolAndDurability()) {
+                                return; // Stop clearing if no tool or low durability
+                            }
+
+                            ItemStack axe = player.getInventory().getItemInMainHand();
+                            
+                            // Break block naturally at cost of axe durability
+                            block.breakNaturally(axe);
+                            applyDurabilityDamage(axe, 1);
+                            
+                            collectedFoliage.put(type, collectedFoliage.getOrDefault(type, 0) + 1);
+                            clearedAny = true;
+                        }
+                    }
+                }
+            }
+            if (clearedAny) {
+                player.sendActionBar(Component.text("🌿 Clearing thick foliage to pave path...").color(NamedTextColor.YELLOW));
+                // Attract drops from cleared foliage
+                collectFoliageDropsAt(current);
+            }
+        }
+    }
+
+    private void collectFoliageDropsAt(Location loc) {
+        double radius = 4.5;
+        World world = loc.getWorld();
+        world.getNearbyEntities(loc, radius, radius, radius, entity -> entity instanceof Item)
+                .forEach(entity -> {
+                    Item dropped = (Item) entity;
+                    ItemStack stack = dropped.getItemStack();
+                    // Route non-log items (saplings, apples, sticks) to trash/junk storage
+                    routeItemToStorage(stack, Material.OAK_LOG);
+                    dropped.remove();
+                });
     }
 }
 
