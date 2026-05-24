@@ -1,0 +1,25 @@
+name: HereLoggy
+version: '1.0.0'
+main: com.hereloggy.hereloggy.HereLoggyPlugin
+description: Auto-chopping and tree felling plugin with advanced configuration, food consumption, and hostile defense.
+api-version: '1.21'
+author: HereLoggy
+softdepend: [AuraSkills]
+
+commands:
+  hereloggy:
+    description: Main command for HereLoggy auto-chopping
+    usage: /hereloggy <start|stop|restart|clear|setup|config>
+    permission: hereloggy.use
+    aliases: [hl]
+
+permissions:
+  hereloggy.use:
+    description: Allows use of the hereloggy command
+    default: true
+  hereloggy.setup:
+    description: Allows use of the setup wizard
+    default: true
+  hereloggy.config:
+    description: Allows use of the tree configuration UI
+    default: true
