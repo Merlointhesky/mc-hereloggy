@@ -62,6 +62,25 @@ public class TreeConfigUI {
         }
         inventory.setItem(22, methodItem);
 
+        // Slot 20: Remove Bees & Hives Toggle
+        boolean removeBees = config.isRemoveBeesEnabled();
+        ItemStack beeItem = new ItemStack(Material.BEE_NEST);
+        ItemMeta beeMeta = beeItem.getItemMeta();
+        if (beeMeta != null) {
+            beeMeta.displayName(Component.text("Remove Hives & Bees")
+                    .color(removeBees ? NamedTextColor.GREEN : NamedTextColor.RED)
+                    .decorate(TextDecoration.BOLD));
+            List<Component> lore = new ArrayList<>();
+            lore.add(Component.text("Current: " + (removeBees ? "ENABLED" : "DISABLED"))
+                    .color(removeBees ? NamedTextColor.GREEN : NamedTextColor.RED));
+            lore.add(Component.empty());
+            lore.add(Component.text("Click to toggle removing all bees and hives").color(NamedTextColor.GRAY));
+            lore.add(Component.text("within player proximity during chopping.").color(NamedTextColor.GRAY));
+            beeMeta.lore(lore);
+            beeItem.setItemMeta(beeMeta);
+        }
+        inventory.setItem(20, beeItem);
+
         player.openInventory(inventory);
     }
 
@@ -99,6 +118,11 @@ public class TreeConfigUI {
         ItemStack junkItem = createToggleItem(junkMaterial, junkLabel,
                 settings.isJunkEnabled(), "Junk (dump) or Keep (store) wood of this type");
         inventory.setItem(15, junkItem);
+
+        // Slot 17: Proactive Planting Toggle
+        ItemStack proactiveItem = createToggleItem(saplingMat, "Proactive Planting",
+                settings.isProactivePlantEnabled(), "Enable/Disable proactively planting saplings on free dirt");
+        inventory.setItem(17, proactiveItem);
 
         // Slot 26: Back Button
         ItemStack backItem = new ItemStack(Material.ARROW);

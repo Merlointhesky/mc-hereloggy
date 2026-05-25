@@ -124,11 +124,25 @@ public class AreaScanner {
                 || isLeaves(material)
                 || isLog(material)
                 || isMangroveRoot(material)
+                || isSapling(material)
                 || isOpenablePassage(material)
                 || material == Material.SHORT_GRASS
                 || material == Material.TALL_GRASS
                 || material == Material.FERN
                 || material == Material.LARGE_FERN;
+    }
+
+    private static boolean isSapling(Material material) {
+        return material == Material.OAK_SAPLING ||
+               material == Material.SPRUCE_SAPLING ||
+               material == Material.BIRCH_SAPLING ||
+               material == Material.JUNGLE_SAPLING ||
+               material == Material.ACACIA_SAPLING ||
+               material == Material.DARK_OAK_SAPLING ||
+               material == Material.MANGROVE_PROPAGULE ||
+               material == Material.CHERRY_SAPLING ||
+               material == Material.CRIMSON_FUNGUS ||
+               material == Material.WARPED_FUNGUS;
     }
 
     private static boolean isOpenablePassage(Material material) {

@@ -44,6 +44,10 @@ public class TreeConfigManager {
                 } catch (IllegalArgumentException ignored) {}
             }
 
+            if (yaml.contains("removeBeesEnabled")) {
+                config.setRemoveBeesEnabled(yaml.getBoolean("removeBeesEnabled", false));
+            }
+
             if (yaml.contains("treeSettings")) {
                 org.bukkit.configuration.ConfigurationSection treeSection = yaml.getConfigurationSection("treeSettings");
                 for (String logName : treeSection.getKeys(false)) {
@@ -53,9 +57,10 @@ public class TreeConfigManager {
 
                         boolean enabled = settingsSection.getBoolean("enabled", true);
                         boolean replant = settingsSection.getBoolean("replantEnabled", true);
+                        boolean proactive = settingsSection.getBoolean("proactivePlantEnabled", false);
                         boolean junk = settingsSection.getBoolean("junkEnabled", false);
 
-                        TreeSettings settings = new TreeSettings(logType, enabled, replant, junk);
+                        TreeSettings settings = new TreeSettings(logType, enabled, replant, proactive, junk);
                         config.setTreeSettings(logType, settings);
                     } catch (IllegalArgumentException e) {
                         plugin.getLogger().warning("Unknown tree log type in config: " + logName);
@@ -84,8 +89,16 @@ public class TreeConfigManager {
         return getTreeSettings(playerId, logType).isReplantEnabled();
     }
 
+    public boolean isProactivePlantEnabled(UUID playerId, Material logType) {
+        return getTreeSettings(playerId, logType).isProactivePlantEnabled();
+    }
+
     public boolean isJunkEnabled(UUID playerId, Material logType) {
         return getTreeSettings(playerId, logType).isJunkEnabled();
+    }
+
+    public boolean isRemoveBeesEnabled(UUID playerId) {
+        return getPlayerConfig(playerId).isRemoveBeesEnabled();
     }
 
     public void toggleEnabled(UUID playerId, Material logType) {
@@ -100,9 +113,21 @@ public class TreeConfigManager {
         saveConfiguration(playerId);
     }
 
+    public void toggleProactivePlant(UUID playerId, Material logType) {
+        PlayerTreeConfig config = getPlayerConfig(playerId);
+        config.getTreeSettings(logType).toggleProactivePlant();
+        saveConfiguration(playerId);
+    }
+
     public void toggleJunk(UUID playerId, Material logType) {
         PlayerTreeConfig config = getPlayerConfig(playerId);
         config.getTreeSettings(logType).toggleJunk();
+        saveConfiguration(playerId);
+    }
+
+    public void toggleRemoveBees(UUID playerId) {
+        PlayerTreeConfig config = getPlayerConfig(playerId);
+        config.toggleRemoveBees();
         saveConfiguration(playerId);
     }
 
@@ -127,6 +152,7 @@ public class TreeConfigManager {
 
         yaml.set("playerId", config.getPlayerId());
         yaml.set("choppingMethod", config.getChoppingMethod().name());
+        yaml.set("removeBeesEnabled", config.isRemoveBeesEnabled());
         yaml.set("lastModified", config.getLastModified());
 
         for (Map.Entry<Material, TreeSettings> entry : config.getAllTreeSettings().entrySet()) {
@@ -134,6 +160,7 @@ public class TreeConfigManager {
             TreeSettings settings = entry.getValue();
             yaml.set(path + ".enabled", settings.isEnabled());
             yaml.set(path + ".replantEnabled", settings.isReplantEnabled());
+            yaml.set(path + ".proactivePlantEnabled", settings.isProactivePlantEnabled());
             yaml.set(path + ".junkEnabled", settings.isJunkEnabled());
         }
 

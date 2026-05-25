@@ -17,6 +17,7 @@ A premium [Paper](https://papermc.io) Minecraft plugin for **fully automated lum
 - **Automatic Foliage & Obstacle Clearing**:
   - Periodically scans a local radius around the player to **break leaves, vines, and nether foliage** automatically.
   - Keeps walking paths fully clear to prevent the player from getting stuck or trapped.
+  - **Emergency Trapped & Suffocation Rescue**: Actively monitors if the player is suffocating or trapped inside solid blocks (e.g., logs/leaves due to tree growth, or pushed underground). Instantly fells any logs and foliage in a 5x5x5 cubic area and teleports the player to the nearest safe path node or adjacent safe ground coordinate.
 
 - **Smart Tool Preservation & Restocking**:
   - Monitors axe durability in real-time. Automatically swaps active quickslots to another axe in the inventory to prevent tool breakage.
@@ -29,7 +30,8 @@ A premium [Paper](https://papermc.io) Minecraft plugin for **fully automated lum
 
 - **Integrated Hostile Mob Defense & Auto-Feeding**:
   - Monitors surrounding entities and **actively defends the player** from hostile mobs, pausing wood-cutting for weapon cooldown ticks.
-  - Automatically consumes food items from the inventory/offhand when hunger drops below saturation limits.
+  - **Smart Whole-Inventory Feeding**: Automatically consumes food from **any inventory slot** (not just the hotbar) when hunger drops below saturation limits.
+  - **Smart Food Preservation**: During automated inventory dumps to Keep/Trash chests, the bot automatically identifies and preserves the **largest food stack** (cooked or raw) in the inventory to ensure continuous operations.
 
 - **Vacuum Drop Attraction & Shared Mending Repair**:
   - Automatically vacuum-attracts all dropped items and experience orbs within a **6-block radius** around broken blocks.

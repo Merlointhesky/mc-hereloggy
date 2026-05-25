@@ -59,6 +59,16 @@ public class TreeConfigListener implements Listener {
                             .color(NamedTextColor.YELLOW)));
             configUI.openMainMenu(player);
         }
+        // Check for remove bees global toggle (slot 20)
+        else if (slot == 20) {
+            configManager.toggleRemoveBees(player.getUniqueId());
+            boolean removeBees = configManager.isRemoveBeesEnabled(player.getUniqueId());
+            player.sendMessage(Component.text("Hive/Bee removal is now ")
+                    .color(NamedTextColor.GREEN)
+                    .append(Component.text(removeBees ? "ENABLED" : "DISABLED")
+                            .color(removeBees ? NamedTextColor.GREEN : NamedTextColor.RED)));
+            configUI.openMainMenu(player);
+        }
     }
 
     private void handleSettingsMenuClick(Player player, ItemStack clicked, int slot) {
@@ -95,6 +105,16 @@ public class TreeConfigListener implements Listener {
                     .color(NamedTextColor.GREEN)
                     .append(Component.text(junk ? "TRASH CHEST" : "KEEP CHEST")
                             .color(junk ? NamedTextColor.RED : NamedTextColor.GREEN)));
+            configUI.openTreeSettingsMenu(player, logType);
+        }
+        // Slot 17: Proactive planting toggle
+        else if (slot == 17) {
+            configManager.toggleProactivePlant(player.getUniqueId(), logType);
+            boolean proactive = configManager.isProactivePlantEnabled(player.getUniqueId(), logType);
+            player.sendMessage(Component.text("Proactive Planting for " + TreeConfigUI.getTreeDisplayName(logType) + " is now ")
+                    .color(NamedTextColor.GREEN)
+                    .append(Component.text(proactive ? "ENABLED" : "DISABLED")
+                            .color(proactive ? NamedTextColor.GREEN : NamedTextColor.RED)));
             configUI.openTreeSettingsMenu(player, logType);
         }
         // Slot 26: Back Arrow button

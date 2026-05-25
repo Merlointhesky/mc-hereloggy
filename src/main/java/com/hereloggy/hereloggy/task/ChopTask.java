@@ -104,6 +104,12 @@ public class ChopTask extends BukkitRunnable {
             return;
         }
 
+        // Emergency Suffocation & Trapped Rescue Check
+        if (isSuffocatingOrTrapped()) {
+            handleSuffocationRescue();
+            return;
+        }
+
         // 1a. Hostile mob defense
         if (handleDefense()) {
             chopPause = 8; // pause auto-chopping for 8 ticks to honor weapon cooldown
@@ -344,6 +350,39 @@ public class ChopTask extends BukkitRunnable {
             }
         }
 
+        // Remove Beehives and kill bees if enabled globally within a 5-block radius of the player
+        if (config.isRemoveBeesEnabled()) {
+            Location pLoc = player.getLocation();
+            World world = pLoc.getWorld();
+            if (world != null) {
+                int px = pLoc.getBlockX();
+                int py = pLoc.getBlockY();
+                int pz = pLoc.getBlockZ();
+
+                // Scan 5-block radius horizontally and vertically around player
+                for (int dx = -5; dx <= 5; dx++) {
+                    for (int dy = -5; dy <= 5; dy++) {
+                        for (int dz = -5; dz <= 5; dz++) {
+                            Block b = world.getBlockAt(px + dx, py + dy, pz + dz);
+                            Material type = b.getType();
+                            if (type == Material.BEE_NEST || type == Material.BEEHIVE) {
+                                org.bukkit.block.BlockState state = b.getState();
+                                if (state instanceof org.bukkit.block.Beehive beehive) {
+                                    List<org.bukkit.entity.Bee> bees = beehive.releaseEntities();
+                                    for (org.bukkit.entity.Bee bee : bees) {
+                                        bee.setHealth(0.0);
+                                    }
+                                }
+                                b.breakNaturally();
+                            }
+                        }
+                    }
+                }
+            }
+            // Exterminate all nearby flying bees within 12 blocks of player
+            killNearbyBees(pLoc, 12.0);
+        }
+
         // Break wood blocks
         for (Block log : logsToBreak) {
             if (!verifyToolAndDurability()) {
@@ -374,7 +413,9 @@ public class ChopTask extends BukkitRunnable {
 
         // Optional Sapling Replanting
         if (settings.isReplantEnabled()) {
-            attemptSaplingReplant(baseBlock, logType);
+            for (Block log : logsToBreak) {
+                attemptSaplingReplant(log, logType);
+            }
         }
     }
 
@@ -384,6 +425,8 @@ public class ChopTask extends BukkitRunnable {
         int ly = loc.getBlockY();
         int lz = loc.getBlockZ();
 
+        ItemStack axe = player.getInventory().getItemInMainHand();
+
         // 3-block radius
         for (int dx = -3; dx <= 3; dx++) {
             for (int dy = -3; dy <= 3; dy++) {
@@ -392,7 +435,7 @@ public class ChopTask extends BukkitRunnable {
                     Material type = block.getType();
 
                     if (isLeavesBlock(type) || isNetherFoliageBlock(type)) {
-                        block.breakNaturally();
+                        block.breakNaturally(axe);
                         collectedFoliage.put(type, collectedFoliage.getOrDefault(type, 0) + 1);
                     }
                 }
@@ -424,6 +467,17 @@ public class ChopTask extends BukkitRunnable {
     private boolean isLogBlock(Material mat) {
         String name = mat.name();
         return Tag.LOGS.isTagged(mat) || name.contains("_LOG") || name.contains("_WOOD") || name.contains("_STEM") || name.contains("_HYPHAE");
+    }
+
+    private void killNearbyBees(Location loc, double radius) {
+        World world = loc.getWorld();
+        if (world == null) return;
+        world.getNearbyEntities(loc, radius, radius, radius, entity -> entity instanceof org.bukkit.entity.Bee)
+                .forEach(entity -> {
+                    if (entity instanceof org.bukkit.entity.Bee bee) {
+                        bee.setHealth(0.0);
+                    }
+                });
     }
 
     private boolean isLeavesBlock(Material mat) {
@@ -601,29 +655,60 @@ public class ChopTask extends BukkitRunnable {
     private int applySharedMendingRepair(int xp) {
         if (xp <= 0) return 0;
 
-        ItemStack axe = null;
-        for (int i = 0; i < 9; i++) {
-            ItemStack item = player.getInventory().getItem(i);
-            if (item != null && item.getAmount() > 0 && item.getType().name().contains("AXE") && item.getEnchantmentLevel(Enchantment.MENDING) > 0) {
-                axe = item;
+        int remainingXp = xp;
+
+        while (remainingXp > 0) {
+            List<ItemStack> eligible = new ArrayList<>();
+            
+            ItemStack mainHand = player.getInventory().getItemInMainHand();
+            if (isMendableAndDamaged(mainHand)) eligible.add(mainHand);
+            
+            ItemStack offHand = player.getInventory().getItemInOffHand();
+            if (isMendableAndDamaged(offHand)) eligible.add(offHand);
+            
+            ItemStack helmet = player.getInventory().getHelmet();
+            if (isMendableAndDamaged(helmet)) eligible.add(helmet);
+            
+            ItemStack chest = player.getInventory().getChestplate();
+            if (isMendableAndDamaged(chest)) eligible.add(chest);
+            
+            ItemStack leggings = player.getInventory().getLeggings();
+            if (isMendableAndDamaged(leggings)) eligible.add(leggings);
+            
+            ItemStack boots = player.getInventory().getBoots();
+            if (isMendableAndDamaged(boots)) eligible.add(boots);
+
+            if (eligible.isEmpty()) {
                 break;
+            }
+
+            // Pick one randomly
+            ItemStack toRepair = eligible.get(new Random().nextInt(eligible.size()));
+            if (toRepair.getItemMeta() instanceof Damageable dmg) {
+                int damage = dmg.getDamage();
+                int xpToUse = Math.min(remainingXp, (int) Math.ceil(damage / 2.0));
+                int repairAmount = Math.min(damage, xpToUse * 2);
+                
+                dmg.setDamage(damage - repairAmount);
+                toRepair.setItemMeta(dmg);
+                player.updateInventory();
+                
+                remainingXp -= xpToUse;
+            } else {
+                break; // Safety fallback
             }
         }
 
-        if (axe == null) return xp;
+        return remainingXp;
+    }
 
-        if (axe.getItemMeta() instanceof Damageable dmg && dmg.getDamage() > 0) {
-            int damage = dmg.getDamage();
-            int repairAmount = Math.min(damage, xp * 2);
-            dmg.setDamage(damage - repairAmount);
-            axe.setItemMeta(dmg);
-            player.updateInventory();
-
-            int usedXp = (int) Math.ceil(repairAmount / 2.0);
-            return xp - usedXp;
+    private boolean isMendableAndDamaged(ItemStack item) {
+        if (item == null || item.getAmount() <= 0) return false;
+        if (item.getEnchantmentLevel(Enchantment.MENDING) <= 0) return false;
+        if (item.getItemMeta() instanceof Damageable dmg) {
+            return dmg.getDamage() > 0;
         }
-
-        return xp;
+        return false;
     }
 
     private void routeItemToStorage(ItemStack stack, Material logType) {
@@ -684,7 +769,22 @@ public class ChopTask extends BukkitRunnable {
         Inventory playerInv = player.getInventory();
         boolean successfullyClearedAny = false;
 
+        // Find the single largest stack of food (edible material) in the inventory to keep
+        int bestFoodSlot = -1;
+        int maxFoodAmount = 0;
         for (int i = 0; i < 36; i++) {
+            ItemStack item = playerInv.getItem(i);
+            if (item != null && item.getAmount() > 0 && item.getType().isEdible()) {
+                if (item.getAmount() > maxFoodAmount) {
+                    maxFoodAmount = item.getAmount();
+                    bestFoodSlot = i;
+                }
+            }
+        }
+
+        for (int i = 0; i < 36; i++) {
+            if (i == bestFoodSlot) continue; // Keep the biggest stack of food!
+
             ItemStack item = playerInv.getItem(i);
             if (item == null || item.getType().isAir()) continue;
 
@@ -801,27 +901,32 @@ public class ChopTask extends BukkitRunnable {
         }
     }
 
-    private int findFoodSlotInHotbar() {
+    private int findFoodSlotInInventory() {
+        // First prioritize hotbar for consistency
         for (int i = 0; i < 9; i++) {
             ItemStack item = player.getInventory().getItem(i);
             if (item == null || item.getAmount() == 0) continue;
 
             Material mat = item.getType();
-            switch (mat) {
-                case COOKED_BEEF, COOKED_PORKCHOP, GOLDEN_CARROT, COOKED_MUTTON,
-                     COOKED_CHICKEN, COOKED_SALMON, COOKED_COD, BAKED_POTATO, BREAD,
-                     GOLDEN_APPLE, ENCHANTED_GOLDEN_APPLE, APPLE, CARROT, COOKED_RABBIT,
-                     MELON_SLICE, COOKIE, SWEET_BERRIES, GLOW_BERRIES -> {
-                    return i;
-                }
-                default -> {}
+            if (mat.isEdible()) {
+                return i;
+            }
+        }
+        // Then search the rest of the inventory
+        for (int i = 9; i < 36; i++) {
+            ItemStack item = player.getInventory().getItem(i);
+            if (item == null || item.getAmount() == 0) continue;
+
+            Material mat = item.getType();
+            if (mat.isEdible()) {
+                return i;
             }
         }
         return -1;
     }
 
     private void handleFeeding() {
-        int foodSlot = findFoodSlotInHotbar();
+        int foodSlot = findFoodSlotInInventory();
         if (foodSlot == -1) return;
 
         ItemStack foodStack = player.getInventory().getItem(foodSlot);
@@ -1137,16 +1242,23 @@ public class ChopTask extends BukkitRunnable {
 
         int foliageCount = 0;
         int logCount = 0;
+        
+        List<Block> freeDirtBlocks = new ArrayList<>();
 
         // Scan 5-block area around player to count logs and foliage
         for (int dx = -5; dx <= 5; dx++) {
             for (int dy = -1; dy <= 4; dy++) {
                 for (int dz = -5; dz <= 5; dz++) {
-                    Material type = world.getBlockAt(px + dx, py + dy, pz + dz).getType();
+                    Block block = world.getBlockAt(px + dx, py + dy, pz + dz);
+                    Material type = block.getType();
                     if (isClearableFoliage(type)) {
                         foliageCount++;
                     } else if (isLogBlock(type)) {
                         logCount++;
+                    } else if (isSoilBlock(type)) {
+                        if (block.getRelative(BlockFace.UP).getType().isAir()) {
+                            freeDirtBlocks.add(block);
+                        }
                     }
                 }
             }
@@ -1184,6 +1296,41 @@ public class ChopTask extends BukkitRunnable {
                 collectFoliageDropsAt(current);
             }
         }
+        
+        if (!freeDirtBlocks.isEmpty()) {
+            proactivelyPlantSaplings(freeDirtBlocks);
+        }
+    }
+
+    private void proactivelyPlantSaplings(List<Block> freeDirtBlocks) {
+        Material saplingToPlant = null;
+        PlayerTreeConfig config = configManager.getPlayerConfig(player.getUniqueId());
+        
+        for (Map.Entry<Material, TreeSettings> entry : config.getAllTreeSettings().entrySet()) {
+            if (entry.getValue().isProactivePlantEnabled()) {
+                Material sapMat = TreeConfigUI.getSaplingMaterial(entry.getKey());
+                if (hasItem(sapMat)) {
+                    saplingToPlant = sapMat;
+                    break;
+                }
+            }
+        }
+        
+        if (saplingToPlant == null) return;
+        
+        int planted = 0;
+        Collections.shuffle(freeDirtBlocks);
+        for (Block dirt : freeDirtBlocks) {
+            if (planted >= 2) break; // Limit 2 saplings per scan tick to spread it out
+            Block space = dirt.getRelative(BlockFace.UP);
+            if (space.getType().isAir() && hasItem(saplingToPlant)) {
+                removeInventoryItem(saplingToPlant);
+                space.setType(saplingToPlant);
+                space.getWorld().playSound(space.getLocation(), Sound.BLOCK_GRASS_PLACE, 1.0f, 1.0f);
+                replantedCount++;
+                planted++;
+            }
+        }
     }
 
     private void collectFoliageDropsAt(Location loc) {
@@ -1197,6 +1344,98 @@ public class ChopTask extends BukkitRunnable {
                     routeItemToStorage(stack, Material.OAK_LOG);
                     dropped.remove();
                 });
+    }
+
+    private boolean isSuffocatingOrTrapped() {
+        Location loc = player.getLocation();
+        // Check block at feet (slightly elevated to avoid slabs/stairs false positives)
+        Block feet = loc.clone().add(0, 0.5, 0).getBlock();
+        // Check block at eyes
+        Block head = player.getEyeLocation().getBlock();
+
+        // If the player's head or elevated feet are inside a solid, non-passable block
+        return feet.getType().isSolid() || head.getType().isSolid();
+    }
+
+    private void handleSuffocationRescue() {
+        Location current = player.getLocation();
+        World world = current.getWorld();
+        if (world == null) return;
+
+        player.sendMessage(Component.text("⚠️ You are suffocating or trapped! Activating emergency rescue...").color(NamedTextColor.RED));
+
+        int px = current.getBlockX();
+        int py = current.getBlockY();
+        int pz = current.getBlockZ();
+
+        // 1. Eliminate any foliage or logs in a 5x5x5 area around the player
+        int radius = 2; // dx/dz in [-2, 2], dy in [-1, 3]
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -1; dy <= 3; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    Block block = world.getBlockAt(px + dx, py + dy, pz + dz);
+                    Material type = block.getType();
+                    if (isFoliageOrLog(type) || isClearableFoliage(type)) {
+                        block.breakNaturally();
+                    }
+                }
+            }
+        }
+
+        // 2. Find the next available safe spot
+        Location safeSpot = findNextSafeSpot(current);
+        if (safeSpot != null) {
+            player.teleport(safeSpot);
+            player.sendMessage(Component.text("✔ Teleported to a safe spot!").color(NamedTextColor.GREEN));
+        } else {
+            // Fallback: teleport to the highest safe block at player's current X/Z
+            int highestY = world.getHighestBlockYAt(px, pz);
+            Location fallback = new Location(world, px + 0.5, highestY + 1.0, pz + 0.5);
+            player.teleport(fallback);
+            player.sendMessage(Component.text("✔ Teleported to surface safety!").color(NamedTextColor.GREEN));
+        }
+    }
+
+    private Location findNextSafeSpot(Location current) {
+        World world = current.getWorld();
+        if (world == null) return null;
+
+        // Candidate 1: Try path coordinates starting from the current index
+        if (!path.isEmpty()) {
+            for (int i = 0; i < path.size(); i++) {
+                int index = (currentIndex + i) % path.size();
+                Location node = path.get(index);
+                if (isSafeStandLocation(world, node.getBlockX(), node.getBlockY(), node.getBlockZ())) {
+                    return node.clone().add(0.5, 0.0, 0.5);
+                }
+            }
+        }
+
+        // Candidate 2: Spiral search around current location
+        int px = current.getBlockX();
+        int py = current.getBlockY();
+        int pz = current.getBlockZ();
+
+        for (int r = 1; r <= 8; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    // Only search the outer ring of radius r to avoid re-checking inner coordinates
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue;
+
+                    for (int dy = -3; dy <= 3; dy++) {
+                        int tx = px + dx;
+                        int ty = py + dy;
+                        int tz = pz + dz;
+
+                        if (isSafeStandLocation(world, tx, ty, tz)) {
+                            return new Location(world, tx + 0.5, ty, tz + 0.5);
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 }
 

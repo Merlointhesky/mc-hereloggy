@@ -13,12 +13,14 @@ public class PlayerTreeConfig {
 
     private final String playerId;
     private ChoppingMethod choppingMethod;
+    private boolean removeBeesEnabled;
     private final Map<Material, TreeSettings> settingsMap = new HashMap<>();
     private long lastModified;
 
     public PlayerTreeConfig(String playerId) {
         this.playerId = playerId;
         this.choppingMethod = ChoppingMethod.WHOLE_TREE;
+        this.removeBeesEnabled = false;
         this.lastModified = System.currentTimeMillis();
         initializeDefaults();
     }
@@ -82,8 +84,23 @@ public class PlayerTreeConfig {
         this.lastModified = lastModified;
     }
 
+    public boolean isRemoveBeesEnabled() {
+        return removeBeesEnabled;
+    }
+
+    public void setRemoveBeesEnabled(boolean removeBeesEnabled) {
+        this.removeBeesEnabled = removeBeesEnabled;
+        this.lastModified = System.currentTimeMillis();
+    }
+
+    public void toggleRemoveBees() {
+        this.removeBeesEnabled = !this.removeBeesEnabled;
+        this.lastModified = System.currentTimeMillis();
+    }
+
     public void resetToDefaults() {
         this.choppingMethod = ChoppingMethod.WHOLE_TREE;
+        this.removeBeesEnabled = false;
         for (TreeSettings settings : settingsMap.values()) {
             settings.reset();
         }
