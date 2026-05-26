@@ -4,7 +4,9 @@ import com.hereloggy.hereloggy.config.TreeConfigManager;
 import com.hereloggy.hereloggy.map.ScanManager;
 import com.hereloggy.hereloggy.selection.SelectionManager;
 import com.hereloggy.hereloggy.setup.SetupManager;
+import com.hereloggy.hereloggy.task.ChopTask;
 import com.hereloggy.hereloggy.task.ChopTaskManager;
+import org.bukkit.event.entity.EntityDamageEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Location;
@@ -99,7 +101,54 @@ public class ChopListener implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         chopTaskManager.stopTask(player);
+        chopTaskManager.stopAutoDefense(player, true);
         scanManager.clearScan(player.getUniqueId());
+    }
+
+    @EventHandler
+    public void onPlayerMove(org.bukkit.event.player.PlayerMoveEvent event) {
+        Player player = event.getPlayer();
+        if (chopTaskManager.hasAutoDefense(player)) {
+            com.hereloggy.hereloggy.task.AutoDefenseTask defenseTask = chopTaskManager.getAutoDefenseTask(player);
+            if (defenseTask != null) {
+                Location expected = defenseTask.getExpectedTeleportLocation();
+
+                // If it's a plugin-driven teleport/rotation, ignore it
+                if (expected != null && expected.getWorld() == event.getTo().getWorld()) {
+                    double distSq = expected.distanceSquared(event.getTo());
+                    // A tiny threshold handles floating-point inaccuracies
+                    if (distSq < 0.05) {
+                        defenseTask.clearExpectedTeleportLocation();
+                        return;
+                    }
+                }
+
+                // Check if they actually moved (e.g. moved X, Y, or Z by > 0.05 blocks)
+                Location from = event.getFrom();
+                Location to = event.getTo();
+                if (from.getWorld() != to.getWorld() || 
+                    Math.abs(from.getX() - to.getX()) > 0.05 || 
+                    Math.abs(from.getY() - to.getY()) > 0.05 || 
+                    Math.abs(from.getZ() - to.getZ()) > 0.05) {
+
+                    // Manual movement detected! Stop auto defense
+                    chopTaskManager.stopAutoDefense(player, false);
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onPlayerDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+        if (event.getCause() != EntityDamageEvent.DamageCause.SUFFOCATION) return;
+
+        if (chopTaskManager.isChopping(player)) {
+            ChopTask task = chopTaskManager.getActiveTask(player);
+            if (task != null) {
+                task.handleSuffocationRescue();
+            }
+        }
     }
 
     private boolean isAxe(Material material) {

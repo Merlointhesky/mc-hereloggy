@@ -56,9 +56,17 @@ public class ChopTask extends BukkitRunnable {
     private int foliageScanCooldown = 0;
     private int lastTargetIndex = -1;
     private double lastDist = Double.MAX_VALUE;
+    private Location lastLocation = null;
+    private int inactiveTicks = 0;
 
     // Track chopped tree coordinate keys so we do not chop multiple times
     private final Set<String> choppedTrees = new HashSet<>();
+    // Track permanently protected tree bases that failed to break
+    private final Set<String> protectedTrees = new HashSet<>();
+    // Advanced Inactivity displacement tracking fields
+    private Location baselineLocation = null;
+    private int baselineTicks = 0;
+    private int heartbeatTicks = 0;
 
     // Activity tracking stats
     private final Map<Material, Integer> collectedLogs = new HashMap<>();
@@ -95,59 +103,147 @@ public class ChopTask extends BukkitRunnable {
     public synchronized void cancel() throws IllegalStateException {
         plugin.getChopTaskManager().removeActiveTask(player.getUniqueId());
         super.cancel();
+        plugin.getChopTaskManager().startAutoDefense(player);
     }
 
     @Override
     public void run() {
-        if (!player.isOnline()) {
-            cancel();
-            return;
-        }
+        try {
+            if (!player.isOnline()) {
+                cancel();
+                return;
+            }
 
-        // Emergency Suffocation & Trapped Rescue Check
-        if (isSuffocatingOrTrapped()) {
-            handleSuffocationRescue();
-            return;
-        }
+            Location current = player.getLocation();
 
+            // Periodic status heartbeat every 10 seconds (200 ticks)
+            heartbeatTicks++;
+            if (heartbeatTicks >= 200) {
+                plugin.getLogger().info("[HereLoggy] Heartbeat for " + player.getName() + ": standing at " 
+                    + current.getBlockX() + "," + current.getBlockY() + "," + current.getBlockZ() 
+                    + ". Path index " + currentIndex + "/" + path.size() 
+                    + ". Inactivity ticks: " + inactiveTicks 
+                    + ". Stuck ticks: " + stuckTicks 
+                    + ". Chopped trees: " + choppedTrees.size() 
+                    + ", protected: " + protectedTrees.size());
+                heartbeatTicks = 0;
+            }
+
+            // Track movement
+            double movementDist = 0.0;
+            if (lastLocation != null && lastLocation.getWorld() == current.getWorld()) {
+                movementDist = current.distance(lastLocation);
+            }
+
+            // Run the core tick logic
+            boolean wasActive = tick(current);
+
+            // Advanced Inactivity Detection based on net displacement over 10 ticks (0.5 seconds)
+            if (baselineLocation == null || baselineLocation.getWorld() != current.getWorld()) {
+                baselineLocation = current.clone();
+                baselineTicks = 0;
+                inactiveTicks = 0;
+            } else {
+                baselineTicks++;
+                if (baselineTicks >= 10) {
+                    double netDisplacement = current.distance(baselineLocation);
+                    
+                    // If player hasn't made real progress (moved less than 0.5 blocks net over 0.5 seconds)
+                    // and wasn't doing active work (chopping/feeding/defense)
+                    if (netDisplacement < 0.5 && !wasActive && chopPause <= 0) {
+                        inactiveTicks += 10;
+                        plugin.getLogger().warning("[HereLoggy] " + player.getName() + " lack of real progress detected! Net displacement: " 
+                            + String.format("%.4f", netDisplacement) + " blocks over 10 ticks. Inactivity ticks: " + inactiveTicks + "/20");
+                    } else {
+                        if (inactiveTicks > 0) {
+                            plugin.getLogger().info("[HereLoggy] " + player.getName() + " progress verified. Displacement: " 
+                                + String.format("%.4f", netDisplacement) + " blocks. Resetting inactivity timer.");
+                        }
+                        inactiveTicks = 0;
+                    }
+                    
+                    baselineLocation = current.clone();
+                    baselineTicks = 0;
+                }
+            }
+
+            // Check for inactivity threshold (20 ticks = 1.0 second of absolute freeze or lack of progress)
+            if (inactiveTicks >= 20) {
+                plugin.getLogger().warning("[HereLoggy] Inactivity threshold reached for " + player.getName() + "! Force rescanning and bypassing block...");
+                player.sendMessage(Component.text("⚠️ Inactivity detected! Force rescanning and bypassing block...").color(NamedTextColor.YELLOW));
+                inactiveTicks = 0;
+                stuckTicks = 0;
+
+                if (!path.isEmpty()) {
+                    currentIndex = (currentIndex + 1) % path.size();
+                    Location nextTarget = path.get(currentIndex);
+                    plugin.getLogger().info("[HereLoggy] Teleporting " + player.getName() + " to next target index " + currentIndex + " at " + nextTarget.getBlockX() + "," + nextTarget.getBlockY() + "," + nextTarget.getBlockZ());
+                    teleportToTarget(current, nextTarget);
+                }
+
+                triggerRescan();
+
+                // Reset baseline to teleported location
+                baselineLocation = player.getLocation();
+                baselineTicks = 0;
+            }
+
+            lastLocation = player.getLocation();
+        } catch (Throwable t) {
+            plugin.getLogger().log(java.util.logging.Level.SEVERE, "Unexpected error in HereLoggy ChopTask for player " + player.getName(), t);
+            player.sendMessage(Component.text("⚠️ An unexpected error occurred during auto-chopping! Gracefully stopping task...").color(NamedTextColor.RED));
+            try {
+                cancel();
+            } catch (Exception ex) {
+                // Ignore if already cancelled
+            }
+        }
+    }
+
+    private boolean tick(Location current) {
         // 1a. Hostile mob defense
         if (handleDefense()) {
             chopPause = 8; // pause auto-chopping for 8 ticks to honor weapon cooldown
-            return;
+            return true;
         }
 
         // 1b. Saturation & Hunger feeding
         if (player.getFoodLevel() < 20) {
             handleFeeding();
-            if (chopPause > 0) return; // return if eating
+            if (chopPause > 0) return true; // return if eating
         }
 
         // 1c. Inventory Full Check
         if (isInventoryFull()) {
             if (attemptDumpToChests()) {
                 player.sendMessage(Component.text("Inventory cleared into deposit chests. Resuming...").color(NamedTextColor.GREEN));
+                return true;
             } else {
                 sendActivitySummary();
                 cancel();
                 plugin.getChopTaskManager().recordDurabilityStop(player, currentIndex);
                 player.sendMessage(Component.text("Inventory full! Auto-chopping paused. Configure Keep/Trash chests, then use /hl restart to resume.")
                         .color(NamedTextColor.RED));
-                return;
+                return true;
             }
         }
 
         if (path.isEmpty()) {
             cancel();
-            return;
+            return false;
         }
 
         if (chopPause > 0) {
             chopPause--;
-            return;
+            return true;
+        }
+
+        // Safe bound checks for currentIndex to prevent IndexOutOfBoundsException during asynchronous rescan callback
+        if (currentIndex < 0 || currentIndex >= path.size()) {
+            currentIndex = 0;
         }
 
         Location target = path.get(currentIndex);
-        Location current = player.getLocation();
 
         // 1d. Local Foliage Scan and Active Clearing
         if (foliageScanCooldown <= 0) {
@@ -162,7 +258,7 @@ public class ChopTask extends BukkitRunnable {
             cancel();
             player.sendMessage(Component.text("Auto-chopping stopped — you left the chopping area.")
                     .color(NamedTextColor.RED));
-            return;
+            return false;
         }
 
         // Check if player is stuck or fell
@@ -174,13 +270,13 @@ public class ChopTask extends BukkitRunnable {
         if (totalDist > MAX_DIRECT_STEP_DISTANCE) {
             teleportToTarget(current, target);
             stuckTicks = 0;
-            return;
+            return true;
         }
 
         // Prioritize: check if we are adjacent to a tree in our scan that has NOT been chopped yet
         if (checkAndChopAdjacentTrees(current)) {
             chopPause = CHOP_PAUSE_TICKS;
-            return;
+            return true;
         }
 
         // Collision checking
@@ -201,10 +297,11 @@ public class ChopTask extends BukkitRunnable {
             // Bypass stuck block and continue to the next path node
             currentIndex = (currentIndex + 1) % path.size();
             Location nextTarget = path.get(currentIndex);
+            plugin.getLogger().warning("[HereLoggy] " + player.getName() + " has been collision-stuck for " + stuckTicks + " ticks! Bypassing stuck coordinate to index " + currentIndex + " at " + nextTarget.getBlockX() + "," + nextTarget.getBlockY() + "," + nextTarget.getBlockZ());
             teleportToTarget(current, nextTarget);
             stuckTicks = 0;
             player.sendMessage(Component.text("Bypassed stuck coordinate and continuing to next path point...").color(NamedTextColor.YELLOW));
-            return;
+            return true;
         }
 
         // Snap to target if very close
@@ -219,6 +316,7 @@ public class ChopTask extends BukkitRunnable {
                 currentIndex = 0;
                 triggerRescan();
             }
+            return true;
         } else {
             // Apply velocity towards target
             Vector direction = new Vector(dx, dy, dz).normalize();
@@ -226,6 +324,8 @@ public class ChopTask extends BukkitRunnable {
             Vector velocity = direction.multiply(SPEED * speedMultiplier);
             player.setVelocity(velocity);
         }
+
+        return false;
     }
 
     private void teleportToTarget(Location current, Location target) {
@@ -282,6 +382,11 @@ public class ChopTask extends BukkitRunnable {
                 int groundY = scanResult.getGroundY(tx, tz);
                 Block baseBlock = world.getBlockAt(tx, groundY + 1, tz);
 
+                String key = tx + "," + (groundY + 1) + "," + tz;
+                if (choppedTrees.contains(key) || protectedTrees.contains(key)) {
+                    continue;
+                }
+
                 if (isLogBlock(baseBlock.getType()) || isMangroveRootBlock(baseBlock.getType())) {
                     Material logType = PlayerTreeConfig.normalizeLogType(baseBlock.getType());
                     TreeSettings settings = configManager.getTreeSettings(player.getUniqueId(), logType);
@@ -299,6 +404,8 @@ public class ChopTask extends BukkitRunnable {
     }
 
     private void chopTree(Block baseBlock, Material logType, TreeSettings settings) {
+        plugin.getLogger().info("[HereLoggy] " + player.getName() + " started chopping tree at " + baseBlock.getX() + "," + baseBlock.getY() + "," + baseBlock.getZ() + " (type: " + logType + ")");
+
         player.sendActionBar(Component.text("🌳 Felling " + TreeConfigUI.getTreeDisplayName(logType) + "...").color(NamedTextColor.GREEN));
 
         PlayerTreeConfig config = configManager.getPlayerConfig(player.getUniqueId());
@@ -306,6 +413,10 @@ public class ChopTask extends BukkitRunnable {
 
         // Ensure player is looking towards the tree
         faceLocation(baseBlock.getLocation());
+
+        // Track chopped tree coordinate to prevent infinite attempts
+        String baseKey = baseBlock.getX() + "," + baseBlock.getY() + "," + baseBlock.getZ();
+        choppedTrees.add(baseKey);
 
         List<Block> logsToBreak = new ArrayList<>();
 
@@ -384,6 +495,7 @@ public class ChopTask extends BukkitRunnable {
         }
 
         // Break wood blocks
+        int brokenCount = 0;
         for (Block log : logsToBreak) {
             if (!verifyToolAndDurability()) {
                 break; // swap tool failed or low durability paused
@@ -393,6 +505,15 @@ public class ChopTask extends BukkitRunnable {
             ItemStack axe = player.getInventory().getItemInMainHand();
 
             log.breakNaturally(axe);
+            
+            if (log.getType() == brokenType) {
+                plugin.getLogger().warning("[HereLoggy] Failed to chop wood block " + brokenType + " at " + log.getLocation() + " for player " + player.getName() + " (is area protected?). Skipping this tree.");
+                // Add the base block coordinate to permanently protected trees list
+                protectedTrees.add(baseKey);
+                break;
+            }
+
+            brokenCount++;
             applyDurabilityDamage(axe, 1);
 
             // Award AuraSkills Foraging XP according to the type of wood broken
@@ -416,6 +537,10 @@ public class ChopTask extends BukkitRunnable {
             for (Block log : logsToBreak) {
                 attemptSaplingReplant(log, logType);
             }
+        }
+
+        if (brokenCount > 0) {
+            plugin.getLogger().info("[HereLoggy] " + player.getName() + " successfully finished chopping tree at " + baseBlock.getX() + "," + baseBlock.getY() + "," + baseBlock.getZ() + " (broke " + brokenCount + " logs)");
         }
     }
 
@@ -711,13 +836,52 @@ public class ChopTask extends BukkitRunnable {
         return false;
     }
 
+    private int getSaplingCount(Material mat) {
+        int total = 0;
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (item != null && item.getType() == mat) {
+                total += item.getAmount();
+            }
+        }
+        return total;
+    }
+
     private void routeItemToStorage(ItemStack stack, Material logType) {
         Material mat = stack.getType();
         if (isSapling(mat)) {
-            HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(stack);
-            if (!leftover.isEmpty()) {
-                ItemStack fall = leftover.values().iterator().next();
-                player.getWorld().dropItemNaturally(player.getLocation(), fall);
+            int currentCount = getSaplingCount(mat);
+            int maxAllowed = 64; // 1 stack limit
+
+            if (currentCount >= maxAllowed) {
+                // Already have a full stack, so this entire stack is treasure!
+                depositIntoChest(stack, false);
+            } else {
+                int needed = maxAllowed - currentCount;
+                if (stack.getAmount() <= needed) {
+                    // We can take the whole stack into inventory
+                    HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(stack);
+                    if (!leftover.isEmpty()) {
+                        ItemStack fall = leftover.values().iterator().next();
+                        player.getWorld().dropItemNaturally(player.getLocation(), fall);
+                    }
+                } else {
+                    // Split the stack: keep enough to reach 64, deposit the rest
+                    ItemStack toKeep = stack.clone();
+                    toKeep.setAmount(needed);
+
+                    ItemStack toDeposit = stack.clone();
+                    toDeposit.setAmount(stack.getAmount() - needed);
+
+                    // Add toKeep to inventory
+                    HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(toKeep);
+                    if (!leftover.isEmpty()) {
+                        ItemStack fall = leftover.values().iterator().next();
+                        player.getWorld().dropItemNaturally(player.getLocation(), fall);
+                    }
+
+                    // Deposit toDeposit to chest
+                    depositIntoChest(toDeposit, false);
+                }
             }
             return;
         }
@@ -782,6 +946,9 @@ public class ChopTask extends BukkitRunnable {
             }
         }
 
+        // Track how many we have chosen to keep so far for each sapling type
+        Map<Material, Integer> keptSaplingCounts = new HashMap<>();
+
         for (int i = 0; i < 36; i++) {
             if (i == bestFoodSlot) continue; // Keep the biggest stack of food!
 
@@ -790,16 +957,58 @@ public class ChopTask extends BukkitRunnable {
 
             Material mat = item.getType();
             if (mat.name().contains("AXE") || mat.name().contains("SWORD")) continue; // Keep tools
-            if (isSapling(mat)) continue; // Keep saplings in inventory!
 
-            boolean isKeep = false;
-            if (isLogBlock(mat)) {
+            Location chestLoc = null;
+
+            if (isSapling(mat)) {
+                int kept = keptSaplingCounts.getOrDefault(mat, 0);
+                if (kept >= 64) {
+                    // Already have a full stack kept, dump this stack!
+                    chestLoc = setup.getTrashChest();
+                } else {
+                    int canKeep = 64 - kept;
+                    if (item.getAmount() <= canKeep) {
+                        keptSaplingCounts.put(mat, kept + item.getAmount());
+                        continue; // Keep the entire stack in inventory
+                    } else {
+                        // Split it: keep canKeep in inventory, dump the rest
+                        ItemStack toKeep = item.clone();
+                        toKeep.setAmount(canKeep);
+
+                        ItemStack toDump = item.clone();
+                        toDump.setAmount(item.getAmount() - canKeep);
+
+                        chestLoc = setup.getTrashChest();
+                        if (chestLoc != null && chestLoc.getBlock().getState() instanceof Container container) {
+                            Inventory chestInv = container.getInventory();
+                            HashMap<Integer, ItemStack> leftover = chestInv.addItem(toDump);
+                            if (leftover.isEmpty()) {
+                                playerInv.setItem(i, toKeep);
+                                successfullyClearedAny = true;
+                                keptSaplingCounts.put(mat, 64);
+                            } else {
+                                int remainingAmount = leftover.values().iterator().next().getAmount();
+                                ItemStack newStack = item.clone();
+                                newStack.setAmount(canKeep + remainingAmount);
+                                playerInv.setItem(i, newStack);
+                                if (newStack.getAmount() < item.getAmount()) {
+                                    successfullyClearedAny = true;
+                                }
+                                keptSaplingCounts.put(mat, kept + (item.getAmount() - remainingAmount));
+                            }
+                        }
+                        continue;
+                    }
+                }
+            } else if (isLogBlock(mat)) {
                 Material baseLog = PlayerTreeConfig.normalizeLogType(mat);
                 TreeSettings settings = configManager.getTreeSettings(player.getUniqueId(), baseLog);
-                isKeep = !settings.isJunkEnabled();
+                boolean isKeep = !settings.isJunkEnabled();
+                chestLoc = isKeep ? setup.getKeepChest() : setup.getTrashChest();
+            } else {
+                // Non-log item (e.g. apple, stick) is always JUNK
+                chestLoc = setup.getTrashChest();
             }
-
-            Location chestLoc = isKeep ? setup.getKeepChest() : setup.getTrashChest();
 
             if (chestLoc != null && chestLoc.getBlock().getState() instanceof Container container) {
                 Inventory chestInv = container.getInventory();
@@ -1177,26 +1386,65 @@ public class ChopTask extends BukkitRunnable {
         Inventory playerInv = player.getInventory();
         boolean successfullyClearedAny = false;
 
+        // Track how many we have chosen to keep so far for each sapling type
+        Map<Material, Integer> keptSaplingCounts = new HashMap<>();
+
         for (int i = 0; i < 36; i++) {
             ItemStack item = playerInv.getItem(i);
             if (item == null || item.getType().isAir()) continue;
 
             Material mat = item.getType();
             if (isSapling(mat)) {
-                // Saplings are non-logs, so they always go into the Junk/Trash chest at the end of the loop
-                Location chestLoc = setup.getTrashChest();
-
-                if (chestLoc != null && chestLoc.getBlock().getState() instanceof Container container) {
-                    Inventory chestInv = container.getInventory();
-                    HashMap<Integer, ItemStack> leftover = chestInv.addItem(item);
-                    if (leftover.isEmpty()) {
-                        playerInv.setItem(i, null);
-                        successfullyClearedAny = true;
-                    } else {
-                        ItemStack remaining = leftover.values().iterator().next();
-                        playerInv.setItem(i, remaining);
-                        if (remaining.getAmount() < item.getAmount()) {
+                int kept = keptSaplingCounts.getOrDefault(mat, 0);
+                if (kept >= 64) {
+                    // We already kept a full stack of this sapling type, so dump this one!
+                    Location chestLoc = setup.getTrashChest();
+                    if (chestLoc != null && chestLoc.getBlock().getState() instanceof Container container) {
+                        Inventory chestInv = container.getInventory();
+                        HashMap<Integer, ItemStack> leftover = chestInv.addItem(item);
+                        if (leftover.isEmpty()) {
+                            playerInv.setItem(i, null);
                             successfullyClearedAny = true;
+                        } else {
+                            ItemStack remaining = leftover.values().iterator().next();
+                            playerInv.setItem(i, remaining);
+                            if (remaining.getAmount() < item.getAmount()) {
+                                successfullyClearedAny = true;
+                            }
+                        }
+                    }
+                } else {
+                    // We can keep some or all of this stack
+                    int canKeep = 64 - kept;
+                    if (item.getAmount() <= canKeep) {
+                        // Keep the entire item stack
+                        keptSaplingCounts.put(mat, kept + item.getAmount());
+                    } else {
+                        // Keep a portion, dump the rest
+                        ItemStack toKeep = item.clone();
+                        toKeep.setAmount(canKeep);
+
+                        ItemStack toDump = item.clone();
+                        toDump.setAmount(item.getAmount() - canKeep);
+
+                        Location chestLoc = setup.getTrashChest();
+                        if (chestLoc != null && chestLoc.getBlock().getState() instanceof Container container) {
+                            Inventory chestInv = container.getInventory();
+                            HashMap<Integer, ItemStack> leftover = chestInv.addItem(toDump);
+                            if (leftover.isEmpty()) {
+                                playerInv.setItem(i, toKeep);
+                                successfullyClearedAny = true;
+                                keptSaplingCounts.put(mat, 64);
+                            } else {
+                                int remainingAmount = leftover.values().iterator().next().getAmount();
+                                ItemStack newStack = item.clone();
+                                newStack.setAmount(canKeep + remainingAmount);
+                                playerInv.setItem(i, newStack);
+                                if (newStack.getAmount() < item.getAmount()) {
+                                    successfullyClearedAny = true;
+                                }
+                                keptSaplingCounts.put(mat, kept + (item.getAmount() - remainingAmount));
+                            }
                         }
                     }
                 }
@@ -1205,7 +1453,7 @@ public class ChopTask extends BukkitRunnable {
 
         if (successfullyClearedAny) {
             player.updateInventory();
-            player.sendMessage(Component.text("Saplings cleared into deposit chests.").color(NamedTextColor.GREEN));
+            player.sendMessage(Component.text("Excess saplings cleared into deposit chests.").color(NamedTextColor.GREEN));
         }
     }
 
@@ -1221,6 +1469,7 @@ public class ChopTask extends BukkitRunnable {
             if (!newPath.isEmpty()) {
                 path.clear();
                 path.addAll(newPath);
+                currentIndex = PathGenerator.findClosestIndex(newPath, player.getLocation());
             }
             choppedTrees.clear();
         });
@@ -1346,23 +1595,12 @@ public class ChopTask extends BukkitRunnable {
                 });
     }
 
-    private boolean isSuffocatingOrTrapped() {
-        Location loc = player.getLocation();
-        // Check block at feet (slightly elevated to avoid slabs/stairs false positives)
-        Block feet = loc.clone().add(0, 0.5, 0).getBlock();
-        // Check block at eyes
-        Block head = player.getEyeLocation().getBlock();
-
-        // If the player's head or elevated feet are inside a solid, non-passable block
-        return feet.getType().isSolid() || head.getType().isSolid();
-    }
-
-    private void handleSuffocationRescue() {
+    public void handleSuffocationRescue() {
         Location current = player.getLocation();
         World world = current.getWorld();
         if (world == null) return;
 
-        player.sendMessage(Component.text("⚠️ You are suffocating or trapped! Activating emergency rescue...").color(NamedTextColor.RED));
+        player.sendMessage(Component.text("⚠️ You are suffocating! Activating emergency rescue...").color(NamedTextColor.RED));
 
         int px = current.getBlockX();
         int py = current.getBlockY();
@@ -1382,44 +1620,29 @@ public class ChopTask extends BukkitRunnable {
             }
         }
 
-        // 2. Find the next available safe spot
-        Location safeSpot = findNextSafeSpot(current);
-        if (safeSpot != null) {
-            player.teleport(safeSpot);
-            player.sendMessage(Component.text("✔ Teleported to a safe spot!").color(NamedTextColor.GREEN));
-        } else {
-            // Fallback: teleport to the highest safe block at player's current X/Z
-            int highestY = world.getHighestBlockYAt(px, pz);
-            Location fallback = new Location(world, px + 0.5, highestY + 1.0, pz + 0.5);
-            player.teleport(fallback);
-            player.sendMessage(Component.text("✔ Teleported to surface safety!").color(NamedTextColor.GREEN));
-        }
-    }
-
-    private Location findNextSafeSpot(Location current) {
-        World world = current.getWorld();
-        if (world == null) return null;
-
+        // 2. Find the next available safe spot and teleport
         // Candidate 1: Try path coordinates starting from the current index
         if (!path.isEmpty()) {
             for (int i = 0; i < path.size(); i++) {
                 int index = (currentIndex + i) % path.size();
                 Location node = path.get(index);
                 if (isSafeStandLocation(world, node.getBlockX(), node.getBlockY(), node.getBlockZ())) {
-                    return node.clone().add(0.5, 0.0, 0.5);
+                    Location safeLoc = node.clone().add(0.5, 0.0, 0.5);
+                    safeLoc.setPitch(current.getPitch());
+                    safeLoc.setYaw(current.getYaw());
+                    player.teleport(safeLoc);
+                    currentIndex = index; // Move index to the safe spot we teleported to!
+                    player.sendMessage(Component.text("✔ Teleported to a safe spot along the path!").color(NamedTextColor.GREEN));
+                    return;
                 }
             }
         }
 
         // Candidate 2: Spiral search around current location
-        int px = current.getBlockX();
-        int py = current.getBlockY();
-        int pz = current.getBlockZ();
-
+        Location safeSpot = null;
         for (int r = 1; r <= 8; r++) {
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
-                    // Only search the outer ring of radius r to avoid re-checking inner coordinates
                     if (Math.abs(dx) != r && Math.abs(dz) != r) continue;
 
                     for (int dy = -3; dy <= 3; dy++) {
@@ -1428,14 +1651,47 @@ public class ChopTask extends BukkitRunnable {
                         int tz = pz + dz;
 
                         if (isSafeStandLocation(world, tx, ty, tz)) {
-                            return new Location(world, tx + 0.5, ty, tz + 0.5);
+                            safeSpot = new Location(world, tx + 0.5, ty, tz + 0.5);
+                            break;
                         }
                     }
+                    if (safeSpot != null) break;
                 }
+                if (safeSpot != null) break;
             }
+            if (safeSpot != null) break;
         }
 
-        return null;
+        if (safeSpot != null) {
+            safeSpot.setPitch(current.getPitch());
+            safeSpot.setYaw(current.getYaw());
+            player.teleport(safeSpot);
+            currentIndex = findClosestPathIndex(safeSpot);
+            player.sendMessage(Component.text("✔ Teleported to a nearby safe spot!").color(NamedTextColor.GREEN));
+        } else {
+            // Fallback: teleport to the highest safe block at player's current X/Z
+            int highestY = world.getHighestBlockYAt(px, pz);
+            Location fallback = new Location(world, px + 0.5, highestY + 1.0, pz + 0.5);
+            fallback.setPitch(current.getPitch());
+            fallback.setYaw(current.getYaw());
+            player.teleport(fallback);
+            currentIndex = findClosestPathIndex(fallback);
+            player.sendMessage(Component.text("✔ Teleported to surface safety!").color(NamedTextColor.GREEN));
+        }
+    }
+
+    private int findClosestPathIndex(Location loc) {
+        if (path.isEmpty()) return 0;
+        int closestIndex = 0;
+        double minDistSq = Double.MAX_VALUE;
+        for (int i = 0; i < path.size(); i++) {
+            double distSq = path.get(i).distanceSquared(loc);
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                closestIndex = i;
+            }
+        }
+        return closestIndex;
     }
 }
 

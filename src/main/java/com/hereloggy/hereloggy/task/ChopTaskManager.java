@@ -1,5 +1,8 @@
 package com.hereloggy.hereloggy.task;
 
+import com.hereloggy.hereloggy.HereLoggyPlugin;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 
 import java.util.HashMap;
@@ -9,6 +12,7 @@ import java.util.UUID;
 public class ChopTaskManager {
 
     private final Map<UUID, ChopTask> activeTasks = new HashMap<>();
+    private final Map<UUID, AutoDefenseTask> activeDefenseTasks = new HashMap<>();
     private final Map<UUID, Integer> lastStopIndices = new HashMap<>();
     private final Map<UUID, java.util.List<org.bukkit.Location>> cachedPaths = new HashMap<>();
 
@@ -30,6 +34,7 @@ public class ChopTaskManager {
 
     public void startTask(Player player, ChopTask task) {
         stopTask(player);
+        stopAutoDefense(player, true);
         activeTasks.put(player.getUniqueId(), task);
         task.runTaskTimer(task.getPlugin(), 0L, 1L); // Run every single tick for smooth motion
     }
@@ -66,10 +71,44 @@ public class ChopTaskManager {
         return activeTasks.containsKey(player.getUniqueId());
     }
 
+    public ChopTask getActiveTask(Player player) {
+        return activeTasks.get(player.getUniqueId());
+    }
+
+    public void startAutoDefense(Player player) {
+        if (activeDefenseTasks.containsKey(player.getUniqueId())) return;
+        AutoDefenseTask defenseTask = new AutoDefenseTask(HereLoggyPlugin.getInstance(), player);
+        activeDefenseTasks.put(player.getUniqueId(), defenseTask);
+        defenseTask.runTaskTimer(HereLoggyPlugin.getInstance(), 0L, 1L);
+        player.sendMessage(Component.text("⚔ AFK Auto-defense activated! Stand still; we will protect you. Move manually to deactivate.").color(NamedTextColor.GOLD));
+    }
+
+    public void stopAutoDefense(Player player, boolean silent) {
+        AutoDefenseTask defenseTask = activeDefenseTasks.remove(player.getUniqueId());
+        if (defenseTask != null) {
+            defenseTask.cancel();
+            if (!silent) {
+                player.sendMessage(Component.text("⚔ AFK Auto-defense deactivated.").color(NamedTextColor.YELLOW));
+            }
+        }
+    }
+
+    public boolean hasAutoDefense(Player player) {
+        return activeDefenseTasks.containsKey(player.getUniqueId());
+    }
+
+    public AutoDefenseTask getAutoDefenseTask(Player player) {
+        return activeDefenseTasks.get(player.getUniqueId());
+    }
+
     public void stopAllTasks() {
         for (ChopTask task : activeTasks.values()) {
             task.cancel();
         }
         activeTasks.clear();
+        for (AutoDefenseTask task : activeDefenseTasks.values()) {
+            task.cancel();
+        }
+        activeDefenseTasks.clear();
     }
 }
