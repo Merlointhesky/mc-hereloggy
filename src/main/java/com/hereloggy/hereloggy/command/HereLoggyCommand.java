@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
+import java.util.UUID;
 
 public class HereLoggyCommand implements CommandExecutor {
 
@@ -50,7 +51,7 @@ public class HereLoggyCommand implements CommandExecutor {
         }
 
         if (args.length < 1) {
-            player.sendMessage(Component.text("Usage: /hereloggy <start|stop|restart|clear|setup|config>")
+            player.sendMessage(Component.text("Usage: /hereloggy <start|stop|restart|clear|setup|config|select>")
                     .color(NamedTextColor.YELLOW));
             return true;
         }
@@ -66,8 +67,10 @@ public class HereLoggyCommand implements CommandExecutor {
                 }
 
                 if (!selectionManager.hasCompleteSelection(player.getUniqueId())) {
-                    player.sendMessage(Component.text("You must set two points first! Shift-right-click with an axe to set Point A and Point B.")
-                            .color(NamedTextColor.RED));
+                    selectionManager.setSelectionMode(player.getUniqueId(), true);
+                    player.sendMessage(Component.text("You must set two points first! Selection Mode has been automatically enabled.")
+                            .color(NamedTextColor.YELLOW)
+                            .append(Component.text("\nShift-right-click with an axe to set Point A and Point B.").color(NamedTextColor.GREEN)));
                     return true;
                 }
 
@@ -102,8 +105,10 @@ public class HereLoggyCommand implements CommandExecutor {
                 }
 
                 if (!selectionManager.hasCompleteSelection(player.getUniqueId())) {
-                    player.sendMessage(Component.text("Selection missing! Please reselect the area.")
-                            .color(NamedTextColor.RED));
+                    selectionManager.setSelectionMode(player.getUniqueId(), true);
+                    player.sendMessage(Component.text("Selection missing! Selection Mode has been automatically enabled.")
+                            .color(NamedTextColor.YELLOW)
+                            .append(Component.text("\nShift-right-click with an axe to set Point A and Point B.").color(NamedTextColor.GREEN)));
                     return true;
                 }
 
@@ -144,7 +149,19 @@ public class HereLoggyCommand implements CommandExecutor {
                             .color(NamedTextColor.RED));
                 }
             }
-            default -> player.sendMessage(Component.text("Usage: /hereloggy <start|stop|restart|clear|setup|config>")
+            case "select" -> {
+                UUID uuid = player.getUniqueId();
+                boolean currentMode = selectionManager.isSelectionMode(uuid);
+                selectionManager.setSelectionMode(uuid, !currentMode);
+                if (!currentMode) {
+                    player.sendMessage(Component.text("Selection Mode ENABLED! Hold an Axe and Shift-Right-Click two blocks to set Point A and Point B.")
+                            .color(NamedTextColor.GREEN));
+                } else {
+                    player.sendMessage(Component.text("Selection Mode DISABLED.")
+                            .color(NamedTextColor.YELLOW));
+                }
+            }
+            default -> player.sendMessage(Component.text("Usage: /hereloggy <start|stop|restart|clear|setup|config|select>")
                     .color(NamedTextColor.YELLOW));
         }
 

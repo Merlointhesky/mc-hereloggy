@@ -59,6 +59,27 @@ public class ChopTask extends BukkitRunnable {
     private Location lastLocation = null;
     private int inactiveTicks = 0;
 
+    // Breadcrumb and movement tracking for diagnostics
+    private final Queue<Location> breadcrumbs = new LinkedList<>();
+    private static final int BREADCRUMB_LIMIT = 20;
+    private Location lastTeleportDest = null;
+    private int teleportRetryCount = 0;
+
+    private void updateBreadcrumbs(Location current) {
+        breadcrumbs.add(current.clone());
+        if (breadcrumbs.size() > BREADCRUMB_LIMIT) {
+            breadcrumbs.poll();
+        }
+    }
+
+    private double getBreadcrumbDisplacement() {
+        if (breadcrumbs.size() < 2) return 0.0;
+        Location oldest = breadcrumbs.peek();
+        Location latest = player.getLocation();
+        if (oldest.getWorld() != latest.getWorld()) return 999.0;
+        return latest.distance(oldest);
+    }
+
     // Track chopped tree coordinate keys so we do not chop multiple times
     private final Set<String> choppedTrees = new HashSet<>();
     // Track permanently protected tree bases that failed to break
@@ -115,17 +136,11 @@ public class ChopTask extends BukkitRunnable {
             }
 
             Location current = player.getLocation();
+            updateBreadcrumbs(current);
 
             // Periodic status heartbeat every 10 seconds (200 ticks)
             heartbeatTicks++;
             if (heartbeatTicks >= 200) {
-                plugin.getLogger().info("[HereLoggy] Heartbeat for " + player.getName() + ": standing at " 
-                    + current.getBlockX() + "," + current.getBlockY() + "," + current.getBlockZ() 
-                    + ". Path index " + currentIndex + "/" + path.size() 
-                    + ". Inactivity ticks: " + inactiveTicks 
-                    + ". Stuck ticks: " + stuckTicks 
-                    + ". Chopped trees: " + choppedTrees.size() 
-                    + ", protected: " + protectedTrees.size());
                 heartbeatTicks = 0;
             }
 
@@ -152,13 +167,7 @@ public class ChopTask extends BukkitRunnable {
                     // and wasn't doing active work (chopping/feeding/defense)
                     if (netDisplacement < 0.5 && !wasActive && chopPause <= 0) {
                         inactiveTicks += 10;
-                        plugin.getLogger().warning("[HereLoggy] " + player.getName() + " lack of real progress detected! Net displacement: " 
-                            + String.format("%.4f", netDisplacement) + " blocks over 10 ticks. Inactivity ticks: " + inactiveTicks + "/20");
                     } else {
-                        if (inactiveTicks > 0) {
-                            plugin.getLogger().info("[HereLoggy] " + player.getName() + " progress verified. Displacement: " 
-                                + String.format("%.4f", netDisplacement) + " blocks. Resetting inactivity timer.");
-                        }
                         inactiveTicks = 0;
                     }
                     
@@ -169,7 +178,6 @@ public class ChopTask extends BukkitRunnable {
 
             // Check for inactivity threshold (20 ticks = 1.0 second of absolute freeze or lack of progress)
             if (inactiveTicks >= 20) {
-                plugin.getLogger().warning("[HereLoggy] Inactivity threshold reached for " + player.getName() + "! Force rescanning and bypassing block...");
                 player.sendMessage(Component.text("⚠️ Inactivity detected! Force rescanning and bypassing block...").color(NamedTextColor.YELLOW));
                 inactiveTicks = 0;
                 stuckTicks = 0;
@@ -177,7 +185,6 @@ public class ChopTask extends BukkitRunnable {
                 if (!path.isEmpty()) {
                     currentIndex = (currentIndex + 1) % path.size();
                     Location nextTarget = path.get(currentIndex);
-                    plugin.getLogger().info("[HereLoggy] Teleporting " + player.getName() + " to next target index " + currentIndex + " at " + nextTarget.getBlockX() + "," + nextTarget.getBlockY() + "," + nextTarget.getBlockZ());
                     teleportToTarget(current, nextTarget);
                 }
 
@@ -297,7 +304,6 @@ public class ChopTask extends BukkitRunnable {
             // Bypass stuck block and continue to the next path node
             currentIndex = (currentIndex + 1) % path.size();
             Location nextTarget = path.get(currentIndex);
-            plugin.getLogger().warning("[HereLoggy] " + player.getName() + " has been collision-stuck for " + stuckTicks + " ticks! Bypassing stuck coordinate to index " + currentIndex + " at " + nextTarget.getBlockX() + "," + nextTarget.getBlockY() + "," + nextTarget.getBlockZ());
             teleportToTarget(current, nextTarget);
             stuckTicks = 0;
             player.sendMessage(Component.text("Bypassed stuck coordinate and continuing to next path point...").color(NamedTextColor.YELLOW));
@@ -306,7 +312,6 @@ public class ChopTask extends BukkitRunnable {
 
         // Snap to target if very close
         if (totalDist < SNAP_DISTANCE) {
-            teleportToTarget(current, target);
             currentIndex++;
 
             if (currentIndex >= path.size()) {
@@ -354,15 +359,31 @@ public class ChopTask extends BukkitRunnable {
         
         if (safeY != -1) {
             snap.setY(safeY);
+            target.setY(safeY);
         } else {
             int highestY = world.getHighestBlockYAt(tx, tz);
             if (isSafeStandLocation(world, tx, highestY + 1, tz)) {
                 snap.setY(highestY + 1);
+                target.setY(highestY + 1);
             }
         }
 
         snap.setPitch(current.getPitch());
         snap.setYaw(current.getYaw());
+
+        // Duplicate teleport loop detection
+        if (lastTeleportDest != null && lastTeleportDest.getWorld() == snap.getWorld() && lastTeleportDest.distanceSquared(snap) < 0.01) {
+            teleportRetryCount++;
+            if (teleportRetryCount >= 3) {
+                currentIndex = (currentIndex + 1) % path.size();
+                teleportRetryCount = 0;
+                return;
+            }
+        } else {
+            lastTeleportDest = snap.clone();
+            teleportRetryCount = 0;
+        }
+
         player.teleport(snap);
     }
 
@@ -404,8 +425,6 @@ public class ChopTask extends BukkitRunnable {
     }
 
     private void chopTree(Block baseBlock, Material logType, TreeSettings settings) {
-        plugin.getLogger().info("[HereLoggy] " + player.getName() + " started chopping tree at " + baseBlock.getX() + "," + baseBlock.getY() + "," + baseBlock.getZ() + " (type: " + logType + ")");
-
         player.sendActionBar(Component.text("🌳 Felling " + TreeConfigUI.getTreeDisplayName(logType) + "...").color(NamedTextColor.GREEN));
 
         PlayerTreeConfig config = configManager.getPlayerConfig(player.getUniqueId());
@@ -539,9 +558,7 @@ public class ChopTask extends BukkitRunnable {
             }
         }
 
-        if (brokenCount > 0) {
-            plugin.getLogger().info("[HereLoggy] " + player.getName() + " successfully finished chopping tree at " + baseBlock.getX() + "," + baseBlock.getY() + "," + baseBlock.getZ() + " (broke " + brokenCount + " logs)");
-        }
+        // Tree chopping finished successfully
     }
 
     private void destroyFoliageAround(Location loc) {
@@ -1463,13 +1480,22 @@ public class ChopTask extends BukkitRunnable {
         }
         Location pointA = plugin.getSelectionManager().getPointA(player.getUniqueId());
         Location pointB = plugin.getSelectionManager().getPointB(player.getUniqueId());
+        
+        // Preserve active target to restore progress post-rescan
+        Location currentTarget = (currentIndex >= 0 && currentIndex < path.size()) ? path.get(currentIndex).clone() : null;
+
         scanManager.scanAreaAsync(player.getUniqueId(), pointA, pointB, result -> {
             this.scanResult = result;
             List<Location> newPath = PathGenerator.generateSafePath(result);
             if (!newPath.isEmpty()) {
                 path.clear();
                 path.addAll(newPath);
-                currentIndex = PathGenerator.findClosestIndex(newPath, player.getLocation());
+                
+                if (currentTarget != null) {
+                    currentIndex = PathGenerator.findClosestIndex(newPath, currentTarget);
+                } else {
+                    currentIndex = PathGenerator.findClosestIndex(newPath, player.getLocation());
+                }
             }
             choppedTrees.clear();
         });

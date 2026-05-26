@@ -61,6 +61,11 @@ public class ChopListener implements Listener {
             return;
         }
 
+        // Only allow selection if the player is explicitly in Selection Mode
+        if (!selectionManager.isSelectionMode(player.getUniqueId())) {
+            return;
+        }
+
         Location clicked = event.getClickedBlock().getLocation();
 
         if (selectionManager.getPointA(player.getUniqueId()) == null) {
@@ -71,10 +76,11 @@ public class ChopListener implements Listener {
                     .append(Component.text(". Shift-click again to set Point B.").color(NamedTextColor.GREEN)));
         } else if (selectionManager.getPointB(player.getUniqueId()) == null) {
             selectionManager.setPointB(player.getUniqueId(), clicked);
+            selectionManager.setSelectionMode(player.getUniqueId(), false); // Disable selection mode once selection is complete
             player.sendMessage(Component.text("Point B set at ")
                     .color(NamedTextColor.GREEN)
                     .append(Component.text(formatLocation(clicked)).color(NamedTextColor.YELLOW))
-                    .append(Component.text(". Scanning area...").color(NamedTextColor.GREEN)));
+                    .append(Component.text(". Selection complete, selection mode disabled! Scanning area...").color(NamedTextColor.GREEN)));
 
             scanManager.scanAreaAsync(player.getUniqueId(),
                     selectionManager.getPointA(player.getUniqueId()),
