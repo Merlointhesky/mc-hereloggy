@@ -973,7 +973,7 @@ public class ChopTask extends BukkitRunnable {
             if (item == null || item.getType().isAir()) continue;
 
             Material mat = item.getType();
-            if (mat.name().contains("AXE") || mat.name().contains("SWORD")) continue; // Keep tools
+            if (isProtectedItem(mat)) continue; // Keep vital survival gear/tools
 
             Location chestLoc = null;
 
@@ -1718,6 +1718,45 @@ public class ChopTask extends BukkitRunnable {
             }
         }
         return closestIndex;
+    }
+
+    private boolean isProtectedItem(Material mat) {
+        if (mat.isEdible()) return true;
+        
+        String name = mat.name();
+        
+        // Protect Weapons, Tools, & Combat/Survival Gear
+        if (name.contains("SWORD") || name.contains("AXE") || name.contains("PICKAXE") 
+                || name.contains("SHOVEL") || name.contains("HOE") || name.contains("HELMET") 
+                || name.contains("CHESTPLATE") || name.contains("LEGGINGS") || name.contains("BOOTS") 
+                || name.contains("SHIELD") || name.contains("BOW") || name.contains("CROSSBOW") 
+                || name.contains("TRIDENT") || name.contains("MACE") || mat == Material.SHEARS 
+                || mat == Material.FISHING_ROD || mat == Material.FLINT_AND_STEEL || mat == Material.BRUSH 
+                || mat == Material.SPYGLASS || mat == Material.LEAD) {
+            return true;
+        }
+        
+        // Protect high-value survival & portable storage utility items
+        if (mat == Material.TOTEM_OF_UNDYING || mat == Material.ENDER_CHEST 
+                || name.contains("SHULKER_BOX")) {
+            return true;
+        }
+        
+        // Protect survival buckets & specialty fluids
+        if (mat == Material.MILK_BUCKET || mat == Material.WATER_BUCKET 
+                || mat == Material.LAVA_BUCKET || mat == Material.BUCKET 
+                || mat == Material.HONEY_BOTTLE || mat == Material.POTION 
+                || mat == Material.SPLASH_POTION || mat == Material.LINGERING_POTION) {
+            return true;
+        }
+        
+        // Protect basic lighting utilities
+        if (name.contains("TORCH") || name.contains("LANTERN") || name.contains("CAMPFIRE") 
+                || mat == Material.GLOWSTONE || mat == Material.SEA_LANTERN) {
+            return true;
+        }
+        
+        return false;
     }
 }
 
