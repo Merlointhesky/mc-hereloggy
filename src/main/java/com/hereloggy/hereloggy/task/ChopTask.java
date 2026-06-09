@@ -328,7 +328,7 @@ public class ChopTask extends BukkitRunnable {
         } else {
             // Apply velocity towards target
             Vector direction = new Vector(dx, dy, dz).normalize();
-            double speedMultiplier = 1.0 + (auraSkillsHelper.getForagingLevel(player) * 0.01);
+            double speedMultiplier = 1.0 + ((auraSkillsHelper != null ? auraSkillsHelper.getForagingLevel(player) : 0) * 0.01);
             Vector velocity = direction.multiply(SPEED * speedMultiplier);
             player.setVelocity(velocity);
         }
@@ -539,8 +539,10 @@ public class ChopTask extends BukkitRunnable {
             applyDurabilityDamage(axe, 1);
 
             // Award AuraSkills Foraging XP according to the type of wood broken
-            double xpForLog = auraSkillsHelper.getBaseXpForLog(brokenType);
-            auraSkillsHelper.addForagingXp(player, xpForLog);
+            double xpForLog = auraSkillsHelper != null ? auraSkillsHelper.getBaseXpForLog(brokenType) : 1.0;
+            if (auraSkillsHelper != null) {
+                auraSkillsHelper.addForagingXp(player, xpForLog);
+            }
             
             // Award HereRolePlay Collect XP
             if (hereRolePlayHelper.isAvailable()) {
@@ -791,7 +793,7 @@ public class ChopTask extends BukkitRunnable {
                         player.giveExp(leftoverXp);
                     }
 
-                    if (auraSkillsHelper.isAvailable()) {
+                    if (auraSkillsHelper != null && auraSkillsHelper.isAvailable()) {
                         auraSkillsHelper.addForagingXp(player, xp * 2.0);
                     }
                     if (hereRolePlayHelper.isAvailable()) {
@@ -803,7 +805,9 @@ public class ChopTask extends BukkitRunnable {
                 });
 
         // Base Foraging XP reward
-        auraSkillsHelper.addForagingXp(player, 15.0);
+        if (auraSkillsHelper != null) {
+            auraSkillsHelper.addForagingXp(player, 15.0);
+        }
     }
 
     private int applySharedMendingRepair(int xp) {

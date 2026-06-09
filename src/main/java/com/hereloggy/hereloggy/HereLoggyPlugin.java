@@ -21,7 +21,7 @@ public final class HereLoggyPlugin extends JavaPlugin {
     private static HereLoggyPlugin instance;
     private SelectionManager selectionManager;
     private final ChopTaskManager chopTaskManager = new ChopTaskManager();
-    private final AuraSkillsHelper auraSkillsHelper = new AuraSkillsHelper();
+    private AuraSkillsHelper auraSkillsHelper = null;
     private final HereRolePlayHelper hereRolePlayHelper = new HereRolePlayHelper();
     private ScanManager scanManager;
     private SetupManager setupManager;
@@ -40,7 +40,10 @@ public final class HereLoggyPlugin extends JavaPlugin {
         this.treeConfigManager = new TreeConfigManager(this);
         this.treeConfigUI = new TreeConfigUI(treeConfigManager);
 
-        auraSkillsHelper.init();
+        if (getServer().getPluginManager().getPlugin("AuraSkills") != null) {
+            auraSkillsHelper = new AuraSkillsHelper();
+            auraSkillsHelper.init();
+        }
         hereRolePlayHelper.init();
 
         // Create setup wizard command
