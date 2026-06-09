@@ -6,6 +6,7 @@ import com.hereloggy.hereloggy.command.SetupWizardCommand;
 import com.hereloggy.hereloggy.config.TreeConfigManager;
 import com.hereloggy.hereloggy.config.TreeConfigUI;
 import com.hereloggy.hereloggy.config.TreeConfigListener;
+import com.hereloggy.hereloggy.hereroleplay.HereRolePlayHelper;
 import com.hereloggy.hereloggy.listener.ChopListener;
 import com.hereloggy.hereloggy.listener.SetupWizardListener;
 import com.hereloggy.hereloggy.map.ScanManager;
@@ -21,6 +22,7 @@ public final class HereLoggyPlugin extends JavaPlugin {
     private SelectionManager selectionManager;
     private final ChopTaskManager chopTaskManager = new ChopTaskManager();
     private final AuraSkillsHelper auraSkillsHelper = new AuraSkillsHelper();
+    private final HereRolePlayHelper hereRolePlayHelper = new HereRolePlayHelper();
     private ScanManager scanManager;
     private SetupManager setupManager;
     private TreeConfigManager treeConfigManager;
@@ -39,12 +41,13 @@ public final class HereLoggyPlugin extends JavaPlugin {
         this.treeConfigUI = new TreeConfigUI(treeConfigManager);
 
         auraSkillsHelper.init();
+        hereRolePlayHelper.init();
 
         // Create setup wizard command
         setupWizardCommand = new SetupWizardCommand(setupManager, this);
 
         // Register main command
-        getCommand("hereloggy").setExecutor(new HereLoggyCommand(selectionManager, chopTaskManager, auraSkillsHelper, scanManager, setupWizardCommand, treeConfigUI));
+        getCommand("hereloggy").setExecutor(new HereLoggyCommand(selectionManager, chopTaskManager, auraSkillsHelper, hereRolePlayHelper, scanManager, setupWizardCommand, treeConfigUI));
 
         // Register listeners
         getServer().getPluginManager().registerEvents(new ChopListener(selectionManager, chopTaskManager, scanManager, setupManager, treeConfigManager), this);
@@ -83,6 +86,10 @@ public final class HereLoggyPlugin extends JavaPlugin {
 
     public AuraSkillsHelper getAuraSkillsHelper() {
         return auraSkillsHelper;
+    }
+
+    public HereRolePlayHelper getHereRolePlayHelper() {
+        return hereRolePlayHelper;
     }
 
     public SetupManager getSetupManager() {

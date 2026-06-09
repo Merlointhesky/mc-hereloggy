@@ -2,6 +2,7 @@ package com.hereloggy.hereloggy.task;
 
 import com.hereloggy.hereloggy.HereLoggyPlugin;
 import com.hereloggy.hereloggy.auraskills.AuraSkillsHelper;
+import com.hereloggy.hereloggy.hereroleplay.HereRolePlayHelper;
 import com.hereloggy.hereloggy.config.TreeConfigManager;
 import com.hereloggy.hereloggy.config.PlayerTreeConfig;
 import com.hereloggy.hereloggy.config.TreeSettings;
@@ -45,6 +46,7 @@ public class ChopTask extends BukkitRunnable {
     private final Player player;
     private final List<Location> path;
     private final AuraSkillsHelper auraSkillsHelper;
+    private final HereRolePlayHelper hereRolePlayHelper;
     private final ScanManager scanManager;
     private final SetupManager setupManager;
     private final TreeConfigManager configManager;
@@ -95,12 +97,13 @@ public class ChopTask extends BukkitRunnable {
     private int refuelsCount = 0;
     private int replantedCount = 0;
 
-    public ChopTask(HereLoggyPlugin plugin, Player player, List<Location> path,
-                    AuraSkillsHelper auraSkillsHelper, ScanResult scanResult) {
+    public ChopTask(HereLoggyPlugin plugin, Player player, List<Location> path, 
+                    AuraSkillsHelper auraSkillsHelper, HereRolePlayHelper hereRolePlayHelper, ScanResult scanResult) {
         this.plugin = plugin;
         this.player = player;
         this.path = path;
         this.auraSkillsHelper = auraSkillsHelper;
+        this.hereRolePlayHelper = hereRolePlayHelper;
         this.scanManager = plugin.getScanManager();
         this.setupManager = plugin.getSetupManager();
         this.configManager = plugin.getTreeConfigManager();
@@ -538,6 +541,11 @@ public class ChopTask extends BukkitRunnable {
             // Award AuraSkills Foraging XP according to the type of wood broken
             double xpForLog = auraSkillsHelper.getBaseXpForLog(brokenType);
             auraSkillsHelper.addForagingXp(player, xpForLog);
+            
+            // Award HereRolePlay Collect XP
+            if (hereRolePlayHelper.isAvailable()) {
+                hereRolePlayHelper.addCollectXp(player, xpForLog);
+            }
 
             collectedLogs.put(brokenType, collectedLogs.getOrDefault(brokenType, 0) + 1);
 
@@ -783,8 +791,12 @@ public class ChopTask extends BukkitRunnable {
                         player.giveExp(leftoverXp);
                     }
 
-                    // Foraging XP
-                    auraSkillsHelper.addForagingXp(player, xp * 2.0);
+                    if (auraSkillsHelper.isAvailable()) {
+                        auraSkillsHelper.addForagingXp(player, xp * 2.0);
+                    }
+                    if (hereRolePlayHelper.isAvailable()) {
+                        hereRolePlayHelper.addCollectXp(player, xp * 2.0);
+                    }
 
                     player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.4f, 1.2f);
                     orb.remove();

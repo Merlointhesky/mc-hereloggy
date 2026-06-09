@@ -3,6 +3,7 @@ package com.hereloggy.hereloggy.command;
 import com.hereloggy.hereloggy.HereLoggyPlugin;
 import com.hereloggy.hereloggy.auraskills.AuraSkillsHelper;
 import com.hereloggy.hereloggy.config.TreeConfigUI;
+import com.hereloggy.hereloggy.hereroleplay.HereRolePlayHelper;
 import com.hereloggy.hereloggy.map.ScanManager;
 import com.hereloggy.hereloggy.map.ScanResult;
 import com.hereloggy.hereloggy.path.PathGenerator;
@@ -26,16 +27,19 @@ public class HereLoggyCommand implements CommandExecutor {
     private final SelectionManager selectionManager;
     private final ChopTaskManager chopTaskManager;
     private final AuraSkillsHelper auraSkillsHelper;
+    private final HereRolePlayHelper hereRolePlayHelper;
     private final ScanManager scanManager;
     private final SetupWizardCommand setupWizardCommand;
     private final TreeConfigUI treeConfigUI;
 
     public HereLoggyCommand(SelectionManager selectionManager, ChopTaskManager chopTaskManager,
-                            AuraSkillsHelper auraSkillsHelper, ScanManager scanManager,
-                            SetupWizardCommand setupWizardCommand, TreeConfigUI treeConfigUI) {
+                            AuraSkillsHelper auraSkillsHelper, HereRolePlayHelper hereRolePlayHelper,
+                            ScanManager scanManager, SetupWizardCommand setupWizardCommand,
+                            TreeConfigUI treeConfigUI) {
         this.selectionManager = selectionManager;
         this.chopTaskManager = chopTaskManager;
         this.auraSkillsHelper = auraSkillsHelper;
+        this.hereRolePlayHelper = hereRolePlayHelper;
         this.scanManager = scanManager;
         this.setupWizardCommand = setupWizardCommand;
         this.treeConfigUI = treeConfigUI;
@@ -185,7 +189,8 @@ public class HereLoggyCommand implements CommandExecutor {
             java.util.Collections.reverse(path);
         }
 
-        ChopTask task = new ChopTask(HereLoggyPlugin.getInstance(), player, path, auraSkillsHelper, scanResult);
+        player.sendMessage("Starting continuous felling mode...");
+        ChopTask task = new ChopTask(HereLoggyPlugin.getInstance(), player, path, auraSkillsHelper, hereRolePlayHelper, scanResult);
         task.setCurrentIndex(0);
         chopTaskManager.startTask(player, task);
         chopTaskManager.clearLastStop(player);
@@ -207,7 +212,8 @@ public class HereLoggyCommand implements CommandExecutor {
         }
 
         int lastIndex = chopTaskManager.getLastStopIndex(player);
-        ChopTask task = new ChopTask(HereLoggyPlugin.getInstance(), player, path, auraSkillsHelper, scanResult);
+        player.sendMessage("Starting tree felling...");
+        ChopTask task = new ChopTask(HereLoggyPlugin.getInstance(), player, path, auraSkillsHelper, hereRolePlayHelper, scanResult);
         if (lastIndex >= 0 && lastIndex < path.size()) {
             task.setCurrentIndex(lastIndex);
         }
