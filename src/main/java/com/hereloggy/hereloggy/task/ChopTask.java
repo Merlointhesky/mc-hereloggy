@@ -544,9 +544,16 @@ public class ChopTask extends BukkitRunnable {
                 auraSkillsHelper.addForagingXp(player, xpForLog);
             }
             
-            // Award HereRolePlay Collect XP
+            // Award HereRolePlay Collect XP (aligned to native wood break XP values)
             if (hereRolePlayHelper.isAvailable()) {
-                hereRolePlayHelper.addCollectXp(player, xpForLog);
+                double hrpXp = 1.0;
+                String typeName = brokenType.name();
+                if (typeName.contains("PALE_OAK")) {
+                    hrpXp = 2.0;
+                } else if (typeName.contains("CRIMSON") || typeName.contains("WARPED")) {
+                    hrpXp = 1.5;
+                }
+                hereRolePlayHelper.addCollectXp(player, hrpXp);
             }
 
             collectedLogs.put(brokenType, collectedLogs.getOrDefault(brokenType, 0) + 1);
@@ -796,9 +803,7 @@ public class ChopTask extends BukkitRunnable {
                     if (auraSkillsHelper != null && auraSkillsHelper.isAvailable()) {
                         auraSkillsHelper.addForagingXp(player, xp * 2.0);
                     }
-                    if (hereRolePlayHelper.isAvailable()) {
-                        hereRolePlayHelper.addCollectXp(player, xp * 2.0);
-                    }
+
 
                     player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.4f, 1.2f);
                     orb.remove();
