@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.ItemStack;
 
 public class TreeConfigListener implements Listener {
@@ -137,5 +138,14 @@ public class TreeConfigListener implements Listener {
                material == Material.ACACIA_LOG || material == Material.DARK_OAK_LOG ||
                material == Material.MANGROVE_LOG || material == Material.CHERRY_LOG ||
                material == Material.CRIMSON_STEM || material == Material.WARPED_STEM;
+    }
+
+    @EventHandler
+    public void onInventoryDrag(InventoryDragEvent event) {
+        Component titleComponent = event.getView().title();
+        String titleStr = PlainTextComponentSerializer.plainText().serialize(titleComponent);
+        if (titleStr.contains("HereLoggy")) {
+            event.setCancelled(true);
+        }
     }
 }

@@ -45,6 +45,9 @@ A premium [Paper](https://papermc.io) Minecraft plugin for **fully automated lum
   - Award-winning **Foraging XP** is granted for broken log blocks and attracted experience orbs.
   - Player movement velocity multiplier scales dynamically based on their current Foraging Level (`1.0 + Foraging Level * 0.01`).
 
+- **HereRolePlay Integration**:
+  - Automatically awards Collect experience points directly to the player for each log and wood block broken, helping level up Miner and Admin classes.
+
 - **Interactive Configuration GUI**:
   - A beautiful, full-featured GUI to toggle active states, replanting preferences, and inventory routing destinations for 10 tree types: **Oak, Spruce, Birch, Jungle, Acacia, Dark Oak, Mangrove, Cherry, Crimson, and Warped**.
 
