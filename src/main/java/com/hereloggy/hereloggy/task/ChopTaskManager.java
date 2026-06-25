@@ -43,6 +43,7 @@ public class ChopTaskManager {
         ChopTask task = activeTasks.remove(player.getUniqueId());
         if (task != null) {
             recordDurabilityStop(player, task.getCurrentIndex());
+            task.sendActivitySummary();
             task.cancel();
         }
     }

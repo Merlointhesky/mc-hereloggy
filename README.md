@@ -128,7 +128,14 @@ Build the plugin jar using Gradle:
 ```bash
 ./gradlew build
 ```
-The compiled JAR will be saved in the `build/libs/` directory.
+The compiled JAR will be saved as `build/libs/HereLoggy-1.2.3.jar`.
+
+---
+
+## Recent Changes (v1.2.3)
+
+- **Manual Stop Activity Summary Fix**: Fixed a bug where stopping the task manually via `/hl stop` or on player quit did not display the activity summary in chat. It now matches the expected behavior of showing collected logs and replanted saplings count upon any stop.
+- **Version bump & clean build**: Incremented build version to `1.2.3`.
 
 ---
 

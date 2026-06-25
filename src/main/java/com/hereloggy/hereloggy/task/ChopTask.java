@@ -1070,7 +1070,7 @@ public class ChopTask extends BukkitRunnable {
         return successfullyClearedAny;
     }
 
-    private void sendActivitySummary() {
+    public void sendActivitySummary() {
         if (collectedLogs.isEmpty() && collectedFoliage.isEmpty() && refuelsCount == 0 && replantedCount == 0) {
             return;
         }
